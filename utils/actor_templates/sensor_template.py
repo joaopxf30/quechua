@@ -48,17 +48,17 @@ class SensorProtocol(IProtocol):
     to consume.
     """
 
-    packet_count:        int
-    total_produced:      int
-    total_expired:       int
-    _sensor_name:        str
+    packet_count: int
+    total_produced: int
+    total_expired: int
+    _sensor_name: str
     _batch_start_lamport: int
 
     def initialize(self) -> None:
         self._lamport = LamportClock()
-        self.packet_count        = 0
-        self.total_produced      = 0
-        self.total_expired       = 0
+        self.packet_count = 0
+        self.total_produced = 0
+        self.total_expired = 0
         self._batch_start_lamport = 0
 
         # Derive a stable name from the node ID at runtime.
@@ -85,8 +85,8 @@ class SensorProtocol(IProtocol):
                     f"discarding {self.packet_count} packets "
                     f"(age={age} ticks, TTL={PACKET_TTL_TICKS})"
                 )
-                self.total_expired       += self.packet_count
-                self.packet_count         = 0
+                self.total_expired += self.packet_count
+                self.packet_count = 0
                 self._batch_start_lamport = self._lamport.time
 
     def handle_timer(self, timer: str) -> None:
@@ -101,7 +101,7 @@ class SensorProtocol(IProtocol):
             if self.packet_count == 0:
                 self._batch_start_lamport = self._lamport.time
 
-            self.packet_count   += 1
+            self.packet_count += 1
             self.total_produced += 1
 
             self._schedule_packet()
@@ -114,19 +114,19 @@ class SensorProtocol(IProtocol):
 
         if msg.get("sender_type") == AgentType.UAV.value and self.packet_count > 0:
             response: SimpleMessage = {
-                "packets":     {self._sensor_name: self.packet_count},
+                "packets": {self._sensor_name: self.packet_count},
                 "sender_type": AgentType.SENSOR.value,
-                "sender_id":   self.provider.get_id(),
+                "sender_id": self.provider.get_id(),
             }
             self.provider.send_communication_command(
                 SendMessageCommand(json.dumps(response), msg["sender_id"])
             )
-            logging.info(
-                f"Sensor {self._sensor_name}: delivered {self.packet_count} packets "
-                f"to UAV {msg['sender_id']} "
-                f"(produced={self.total_produced}, expired={self.total_expired})"
-            )
-            self.packet_count         = 0
+            # logging.info(
+            #     f"Sensor {self._sensor_name}: delivered {self.packet_count} packets "
+            #     f"to UAV {msg['sender_id']} "
+            #     f"(produced={self.total_produced}, expired={self.total_expired})"
+            # )
+            self.packet_count = 0
             self._batch_start_lamport = self._lamport.time
 
     def handle_telemetry(self, telemetry: Telemetry) -> None:
@@ -136,8 +136,8 @@ class SensorProtocol(IProtocol):
         # Anything still in the buffer at simulation end is undelivered.
         undelivered = self.packet_count
         SENSOR_STATS[self._sensor_name] = {
-            "produced":    self.total_produced,
-            "expired":     self.total_expired,
+            "produced": self.total_produced,
+            "expired": self.total_expired,
             "undelivered": undelivered,
         }
         logging.info(

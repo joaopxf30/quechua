@@ -9,7 +9,7 @@ Three independent policy axes can be swapped without modifying the core
 3. **Reconciliation** — *Who* becomes leader and *how* is state collected?
 
 Developers implement one or more of these ABCs and set them as class-level
-attributes on the UAV protocol class (see ``strategies_default.py`` for
+attributes on the UAV protocol class (see ``einladung.py`` for
 the built-in implementations).
 """
 from __future__ import annotations
@@ -17,7 +17,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum, auto
-from typing import Callable, Dict, Optional, Set
+from typing import Callable, Dict, Optional, Set, Tuple
 
 
 # ── Value objects returned by strategies ───────────────────────────────────
@@ -64,6 +64,7 @@ class ElectionContext:
     election_in_progress: bool
     packets: Dict[str, int]
     election_buffer: Dict[str, int]
+    candidate_leader: Optional[int]
 
     # Callback the strategy can use to broadcast a message dict
     broadcast: Callable[[dict], None] = field(repr=False, default=None)
@@ -110,8 +111,8 @@ class ReconciliationStrategy(ABC):
     after the election completes."""
 
     @abstractmethod
-    def choose_leader(self, ctx: ElectionContext, candidates: Set[int]) -> int:
-        """Given a set of candidate node IDs (including self), return the
+    def choose_leader(self, ctx: ElectionContext, candidate_priority: Set[int]) -> int:
+        """Given a priority criteria (including self), return the
         ID that should become leader."""
         ...
 

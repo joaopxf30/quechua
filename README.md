@@ -54,7 +54,7 @@ The simulation includes a **Bully-style leader election protocol** ([`src/electi
 
 ### Customising Election Policies
 
-The election mixin delegates three policy decisions to **pluggable strategy objects**.  Each is defined as an abstract base class in [`src/strategies.py`](src/strategies.py) with default implementations in [`src/strategies_default.py`](src/strategies_default.py).
+The election mixin delegates three policy decisions to **pluggable strategy objects**.  Each is defined as an abstract base class in [`src/strategies.py`](src/strategies.py) with default implementations in [`src/strategies_default.py`](src/einladung.py).
 
 | Strategy | ABC | Default | What it controls |
 |----------|-----|---------|-----------------|

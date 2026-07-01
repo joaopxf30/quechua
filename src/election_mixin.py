@@ -13,7 +13,7 @@ Three class-level attributes control the election behaviour.  Override
 them with your own :class:`~src.strategies.AnomalyDetectionStrategy`,
 :class:`~src.strategies.InvitationStrategy`, or
 :class:`~src.strategies.ReconciliationStrategy` to swap algorithms
-without touching the core lifecycle (see ``strategies_default.py`` for
+without touching the core lifecycle (see ``einladung.py`` for
 the built-in implementations and the README for usage examples).
 
 Behaviour (defaults)
@@ -44,8 +44,9 @@ import json
 import logging
 from typing import Dict, Optional, Set
 
-from gradysim.protocol.messages.communication import BroadcastMessageCommand
+from gradysim.protocol.messages.communication import BroadcastMessageCommand, SendMessageCommand
 
+from utils.common.agent_types import AgentType
 from utils.metrics.election_stats import ELECTION_LOG, ElectionEvent
 
 from src.strategies import (
@@ -55,7 +56,7 @@ from src.strategies import (
     InvitationStrategy,
     ReconciliationStrategy,
 )
-from src.strategies_default import (
+from src.einladung import (
     AnyMemberLeadInvitation,
     BullyReconciliation,
     HeartbeatTimeoutDetection,
@@ -105,7 +106,7 @@ class ElectionMixin:
     """
 
     # ── Class-level strategy defaults ──────────────────────────────────
-    # Override these in a subclass or in the factory to change behaviour.
+    # Override these in a subclass or in the factory to change behavior.
 
     anomaly_strategy: AnomalyDetectionStrategy = HeartbeatTimeoutDetection()
     invitation_strategy: InvitationStrategy = AnyMemberLeadInvitation()
@@ -134,16 +135,12 @@ class ElectionMixin:
         # Metrics: per-election buffer snapshot
         self._current_election_event: Optional[ElectionEvent] = None
 
-        # Predefined leader: highest ID will be set on first heartbeat exchange
-        # (we can't know the max ID at init time, so we defer)
-        self._leader_predefined: bool = False
-
         # Schedule the periodic split / merge detector
         self._schedule_election_check()
 
     # ── Context builder ────────────────────────────────────────────────
 
-    def _build_election_context(self) -> ElectionContext:
+    def _build_election_context(self, candidate_leader: int | None = None) -> ElectionContext:
         """Create a read-only snapshot of election state for strategies."""
         return ElectionContext(
             my_id=self.provider.get_id(),
@@ -156,12 +153,18 @@ class ElectionMixin:
             packets=dict(self.packets),
             election_buffer=dict(self._election_buffer),
             broadcast=self._broadcast_dict,
+            candidate_leader=candidate_leader
         )
 
     def _broadcast_dict(self, msg: dict) -> None:
         """Convenience: JSON-encode *msg* and broadcast it."""
         self.provider.send_communication_command(
             BroadcastMessageCommand(json.dumps(msg))
+        )
+
+    def _unicast_dict(self, msg: dict, target: int) -> None:
+        self.provider.send_communication_command(
+            SendMessageCommand(json.dumps(msg), target)
         )
 
     # ── Timer scheduling ───────────────────────────────────────────────
@@ -182,7 +185,7 @@ class ElectionMixin:
 
     def handle_timer(self, timer: str) -> None:
         if timer == "election_check":
-            self._check_for_split_or_merge()
+            self._check_for_split()
             self._schedule_election_check()
         elif timer == "election_timeout":
             self._on_election_timeout()
@@ -212,11 +215,18 @@ class ElectionMixin:
             return
         elif msg_type == "data_transfer":
             self._on_receive_data_transfer(raw)
+        elif msg_type == "start_election":
+            self._start_election("merge", raw.get("leader"))
+            update_peers_msg = {"msg_type": "update_peers", "group": raw.get("group")}
+            self._broadcast_dict(update_peers_msg)
+            return
+        elif msg_type == "update_peers":
+            self._on_update_peers(raw)
             return
 
         # ── Sensor data during election → buffer it ────────────────────
         sender_type = raw.get("sender_type")
-        if sender_type == "sensor" and self._election_in_progress:
+        if sender_type == AgentType.SENSOR.value and self._election_in_progress:
             incoming: Dict[str, int] = raw.get("packets", {})
             if incoming:
                 for sensor, count in incoming.items():
@@ -230,7 +240,7 @@ class ElectionMixin:
             return
 
         # ── UAV heartbeat → track peer for split/merge detection ───────
-        if sender_type == "uav":
+        if sender_type == AgentType.UAV.value:
             peer_id = raw.get("sender_id")
             if peer_id is not None:
                 now = self.provider.current_time()
@@ -238,40 +248,39 @@ class ElectionMixin:
                 self._known_peers.add(peer_id)
                 self._peer_last_seen[peer_id] = now
 
-                # First exchange: predefine leader as highest known ID
-                if not self._leader_predefined and not self._election_in_progress:
-                    self._try_predefine_leader()
-
                 # Merge detection: new peer appeared
-                if is_new_peer and self._leader_predefined:
+                if is_new_peer:
                     logging.info(
                         f"UAV {self.provider.get_id()} detected MERGE — "
                         f"new peer {peer_id} appeared"
                     )
-                    self._start_election("merge")
+                    if self._current_leader_id is None:
+                        self._start_election("merge")
+
+                    if self._is_leader:
+                        self._start_election("merge", raw.get("leader"))
+                        self._on_update_peers(raw)
+                        update_peers_msg = {"msg_type": "update_peers", "group": raw.get("group")}
+                        self._broadcast_dict(update_peers_msg)
+
+                    if not self._election_in_progress:
+                        # Not a leader, and needs to inform the leader to start an election
+                        logging.info(
+                            f"UAV {self.provider.get_id()} informs leader {self._current_leader_id}"
+                        )
+                        msg = {
+                            "msg_type": "start_election",
+                            "leader": raw.get("leader") or peer_id,
+                            "group": raw.get("group")
+                        }
+                        self._unicast_dict(msg, self._current_leader_id)
 
         # ── Default: delegate to base class ────────────────────────────
         super().handle_packet(message)
 
-    # ── Pre-defined leader (highest ID seen so far) ────────────────────
-
-    def _try_predefine_leader(self) -> None:
-        """Set the initial leader to the highest known ID (including self)."""
-        all_ids = self._known_peers | {self.provider.get_id()}
-        leader = self.reconciliation_strategy.choose_leader(
-            self._build_election_context(), all_ids,
-        )
-        self._current_leader_id = leader
-        self._is_leader = (leader == self.provider.get_id())
-        self._leader_predefined = True
-        logging.info(
-            f"UAV {self.provider.get_id()} predefined leader → {leader}"
-            f"{' (self)' if self._is_leader else ''}"
-        )
-
     # ── Split / merge detection (delegates to anomaly strategy) ────────
 
-    def _check_for_split_or_merge(self) -> None:
+    def _check_for_split(self) -> None:
         """
         Periodic check: ask the anomaly-detection strategy whether any
         peers have been lost or discovered, then act on the result.
@@ -298,11 +307,11 @@ class ElectionMixin:
                 f"UAV {self.provider.get_id()} lost leader "
                 f"{result.trigger} — triggering election"
             )
-            self._start_election(result.trigger or "split")
+            self._start_election("split")
 
     # ── Election logic (Bully algorithm) ───────────────────────────────
 
-    def _start_election(self, trigger: str) -> None:
+    def _start_election(self, trigger: str, target: int | None = None) -> None:
         """Begin a new election round."""
         if self._election_in_progress:
             return  # already electing
@@ -330,19 +339,22 @@ class ElectionMixin:
         # Ask the invitation strategy to build the election message
         ctx = self._build_election_context()
         msg = self.invitation_strategy.build_election_message(ctx)
-        self._broadcast_dict(msg)
+        if target:
+            self._unicast_dict(msg, target)
+        else:
+            self._broadcast_dict(msg)
 
         # Set timeout: if no "alive" received, we win
         self._schedule_election_timeout()
 
+    def _on_update_peers(self, raw: dict) -> None:
+        new_peers = set(raw["group"])
+        self._known_peers.update(new_peers)
+
     def _on_receive_election(self, raw: dict) -> None:
         """Handle an incoming election message from a peer."""
-        sender_id = raw["sender_id"]
+        sender_id: int = raw["sender_id"]
         my_id = self.provider.get_id()
-
-        logging.debug(
-            f"UAV {my_id} received election from {sender_id}"
-        )
 
         # Use the reconciliation strategy to decide who should prevail
         ctx = self._build_election_context()
@@ -355,12 +367,15 @@ class ElectionMixin:
             # own election
             alive_msg = {
                 "msg_type": "alive",
-                "sender_type": "uav",
+                "sender_type": AgentType.UAV.value,
                 "sender_id": my_id,
             }
-            self._broadcast_dict(alive_msg)
+            self._unicast_dict(alive_msg, sender_id)
             # Start our own election if not already running
             if not self._election_in_progress:
+                logging.info(
+                    f"UAV {my_id} outranks sender {sender_id} — initiating election"
+                )
                 self._start_election(
                     self._current_election_event.trigger
                     if self._current_election_event
@@ -404,7 +419,7 @@ class ElectionMixin:
         # Broadcast leader announcement
         leader_msg = {
             "msg_type": "leader",
-            "sender_type": "uav",
+            "sender_type": AgentType.UAV.value,
             "sender_id": my_id,
             "election_start_time": self._election_start_time,
         }
@@ -413,9 +428,6 @@ class ElectionMixin:
     def _on_receive_leader(self, raw: dict) -> None:
         """Accept the declared leader and transfer buffered data."""
         leader_id = raw["sender_id"]
-        logging.info(
-            f"UAV {self.provider.get_id()} accepts leader → {leader_id}"
-        )
         self._declare_leader(leader_id)
 
     def _declare_leader(self, leader_id: int) -> None:
@@ -475,7 +487,7 @@ class ElectionMixin:
 
         transfer_msg = {
             "msg_type": "data_transfer",
-            "sender_type": "uav",
+            "sender_type": AgentType.UAV.value,
             "sender_id": self.provider.get_id(),
             "packets": dict(self.packets),
         }

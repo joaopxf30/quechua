@@ -59,6 +59,7 @@ from gradysim.protocol.messages.communication import BroadcastMessageCommand
 from gradysim.protocol.messages.telemetry import Telemetry
 
 from utils.actor_templates.path_decision_mixin import PathDecisionMixin
+from utils.common.agent_types import AgentType
 from utils.common.config import FLIGHT_ALT
 
 # ── Arrival threshold (flat XY distance) ──────────────────────────────────
@@ -161,10 +162,12 @@ def make_uav_protocol(
             """
             self._lamport.tick()
             msg = {
-                "sender_type": "uav",
+                "sender_type": AgentType.UAV.value,
                 "sender_id":   self.provider.get_id(),
                 "lamport":     self._lamport.time,
                 "packets":     dict(self.packets),
+                "leader":      self._current_leader_id,
+                "group":       [*self._known_peers]
             }
             self.provider.send_communication_command(
                 BroadcastMessageCommand(json.dumps(msg))
@@ -204,18 +207,18 @@ def make_uav_protocol(
 
             sender_type = raw.get("sender_type")
 
-            if sender_type == "sensor":
+            if sender_type == AgentType.SENSOR.value:
                 incoming: Dict[str, int] = raw.get("packets", {})
                 if incoming:
                     for sensor, count in incoming.items():
                         self.packets[sensor] = self.packets.get(sensor, 0) + count
-                    logging.info(
+                    logging.debug(
                         f"UAV {self.provider.get_id()} (slot {self._cluster_index}) "
                         f"collected {incoming} from sensor {raw.get('sender_id')} "
                         f"| buffer: {self.packets}"
                     )
 
-            elif sender_type == "uav":
+            elif sender_type == AgentType.UAV.value:
                 # Update Lamport clock on receive if lower, then merge packets
                 if "lamport" in raw:
                     if self._lamport.time < raw["lamport"]:

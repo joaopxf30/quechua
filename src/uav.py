@@ -88,11 +88,14 @@ def make_uav(
 
     _loop = loop  # capture in closure
 
-    class _UAV(ElectionMixin, make_uav_protocol(
-        waypoints     = waypoints,
-        cluster_index = cluster_index,
-        num_uavs      = group_size,
-    )):
+    class _UAV(
+        ElectionMixin,
+        make_uav_protocol(
+            waypoints=waypoints,
+            cluster_index=cluster_index,
+            num_uavs=group_size,
+        )
+    ):
         def initialize(self) -> None:
             super().initialize()
             self._loop = _loop
@@ -171,11 +174,15 @@ def make_uav_viz(
 
     _loop = loop  # capture in closure
 
-    class _UAVViz(UAVVizMixin, ElectionMixin, make_uav_protocol(
-        waypoints     = waypoints,
-        cluster_index = cluster_index,
-        num_uavs      = group_size,
-    )):
+    class _UAVViz(
+        UAVVizMixin,
+        ElectionMixin,
+        make_uav_protocol(
+            waypoints=waypoints,
+            cluster_index=cluster_index,
+            num_uavs=group_size,
+        )
+    ):
         """
         Example UAV Protocol with added Visualization support and
         leader election.  ElectionMixin sits between UAVVizMixin and the
