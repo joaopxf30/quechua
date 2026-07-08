@@ -137,6 +137,8 @@ class ElectionMixin:
 
         # Schedule the periodic split / merge detector
         self._schedule_election_check()
+        self._schedule_color()
+
 
     # ── Context builder ────────────────────────────────────────────────
 
@@ -181,6 +183,12 @@ class ElectionMixin:
             self.provider.current_time() + ELECTION_WAIT,
         )
 
+    def _schedule_color(self) -> None:
+        self.provider.schedule_timer(
+            "leader",
+            self.provider.current_time() + 0.01,
+        )
+
     # ── Timer handler ──────────────────────────────────────────────────
 
     def handle_timer(self, timer: str) -> None:
@@ -189,6 +197,10 @@ class ElectionMixin:
             self._schedule_election_check()
         elif timer == "election_timeout":
             self._on_election_timeout()
+        elif timer == "leader":
+            if self._is_leader:
+                self._vc.paint_node(self.provider.get_id(), (255, 20, 147))
+            self._schedule_color()
         else:
             super().handle_timer(timer)
 
