@@ -9,7 +9,7 @@ Three independent policy axes can be swapped without modifying the core
 3. **Reconciliation** — *Who* becomes leader and *how* is state collected?
 
 Developers implement one or more of these ABCs and set them as class-level
-attributes on the UAV protocol class (see ``einladung.py`` for
+attributes on the UAV protocol class (see ``aypuriy.py`` for
 the built-in implementations).
 """
 from __future__ import annotations

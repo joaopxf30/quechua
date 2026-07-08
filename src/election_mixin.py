@@ -13,7 +13,7 @@ Three class-level attributes control the election behaviour.  Override
 them with your own :class:`~src.strategies.AnomalyDetectionStrategy`,
 :class:`~src.strategies.InvitationStrategy`, or
 :class:`~src.strategies.ReconciliationStrategy` to swap algorithms
-without touching the core lifecycle (see ``einladung.py`` for
+without touching the core lifecycle (see ``aypuriy.py`` for
 the built-in implementations and the README for usage examples).
 
 Behaviour (defaults)
@@ -56,7 +56,7 @@ from src.strategies import (
     InvitationStrategy,
     ReconciliationStrategy,
 )
-from src.einladung import (
+from src.aypuriy import (
     AnyMemberLeadInvitation,
     BullyReconciliation,
     HeartbeatTimeoutDetection,
